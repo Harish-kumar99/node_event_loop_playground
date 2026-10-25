@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Node.js Event Loop Playground</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1120;--panel:#151f32;--line:#293750;--muted:#9aabc2;--text:#e8eef8;--blue:#38bdf8;--purple:#c084fc;--green:#4ade80;--yellow:#fbbf24}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:22px}
+main{max-width:1200px;margin:auto}h1{font-size:25px;margin:0 0 4px}.sub{color:var(--muted);margin:0 0 18px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+button{border:1px solid var(--line);background:#24334b;color:var(--text);border-radius:7px;padding:9px 14px;cursor:pointer;font-weight:600}
+button:hover{filter:brightness(1.18)}button:disabled{opacity:.35;cursor:not-allowed}.primary{background:#166534;border-color:#15803d}.warn{background:#854d0e}
+.editor-wrap,.info,.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.editor-wrap{padding:12px}.editor-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}
+ .code-editor{display:flex;align-items:stretch;width:100%;min-height:310px;max-height:620px;overflow:hidden;background:#080e19;border:1px solid #334155;border-radius:7px}
+.line-gutter{flex:0 0 46px;overflow:hidden;padding:13px 9px 13px 0;background:#101827;color:#64748b;text-align:right;user-select:none;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}
+textarea{display:block;flex:1;width:0;min-height:310px;resize:vertical;background:transparent;color:#dbeafe;border:0;border-radius:0;padding:13px;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2;white-space:pre;overflow:auto;outline:none}
+.hint{color:var(--muted);font-size:12px}
+.info{padding:12px 14px;margin:12px 0}.info strong{color:var(--blue)}#status{color:var(--muted);margin-top:3px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.panel{padding:12px;min-height:155px}.panel h3{font-size:14px;margin:0 0 9px}.stack h3{color:var(--yellow)}.nt h3{color:var(--purple)}.prom h3{color:var(--blue)}.timers h3{color:#fb923c}
+.items{display:flex;flex-direction:column;gap:6px}.item{border-radius:6px;padding:7px 9px;background:#26364e;border:1px solid #3b4e6b;font:12px ui-monospace,monospace;overflow-wrap:anywhere}
+.stack .item{background:#594316;border-color:#8a6b23}.nt .item{background:#42215e;border-color:#70419a}.prom .item{background:#123f59;border-color:#17678d}.timers .item{background:#593016;border-color:#8b4c20}
+.empty{color:#71829b;font-style:italic;padding:8px 2px}
+.console{margin-top:10px;background:#050a12;border:1px solid var(--line);border-radius:10px;padding:12px}.console h3{margin:0 0 8px;color:var(--green)}
+#output{display:flex;gap:6px;flex-wrap:wrap;min-height:35px}.out{background:#14532d;color:#dcfce7;border-radius:5px;padding:5px 10px;font:13px ui-monospace,monospace}
+#error{display:none;color:#fecaca;background:#451a1a;border:1px solid #7f1d1d;padding:10px;border-radius:8px;margin:10px 0;white-space:pre-wrap}
+.progress{height:5px;background:#293750;border-radius:8px;margin-top:9px;overflow:hidden}#bar{height:100%;width:0;background:var(--green)}
+footer{color:var(--muted);font-size:12px;margin-top:15px}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){body{padding:12px}.grid{grid-template-columns:1fr}textarea{min-height:260px}}
+ 
+.author-card{margin-top:18px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(135deg,#151f32,#101a2b)}
+.author-name{font-size:18px;font-weight:750;color:#f8fafc;margin:0}
+.author-role{color:var(--blue);margin:2px 0 12px}
+.author-links{display:flex;flex-wrap:wrap;gap:8px 18px}
+.author-links a{color:#cbd5e1;text-decoration:none}
+.author-links a:hover{color:var(--blue);text-decoration:underline}
+.copyright{margin-top:12px;color:#8293aa;font-size:11px}
+</style>
+</head>
+<body>
+<main>
+<h1>Node.js Event Loop Playground</h1>
+<p class="sub">Paste a small Node.js snippet, simulate it, then step through the queues.</p>
+
+<section class="editor-wrap">
+ <div class="editor-head"><strong>JavaScript input</strong><span class="hint">Supported syntax listed below</span></div>
+ <div class="code-editor">
+  <div id="lineNumbers" class="line-gutter" aria-hidden="true">1</div>
+  <textarea id="source" spellcheck="false" wrap="off">console.log("A");
+
+process.nextTick(() => {
+  console.log("B");
+  Promise.resolve().then(() => console.log("C"));
+  process.nextTick(() => console.log("D"));
+});
+
+Promise.resolve().then(() => {
+  console.log("E");
+  process.nextTick(() => console.log("F"));
+  Promise.resolve().then(() => console.log("G"));
+});
+
+console.log("H");</textarea>
+ </div>
+ <div class="hint">Queue labels: N1(line 3) = first nextTick scheduled from line 3; P1(line 8) = first Promise scheduled from line 8. Numbering is separate for nextTick and Promise. Supports console.log("text"), process.nextTick(() =&gt; { ... }), Promise.resolve().then(() =&gt; { ... }), setTimeout(() =&gt; { ... }, delay), and setImmediate(() =&gt; { ... }). Nested callbacks are supported.</div>
+ <div class="toolbar">
+  <button class="primary" id="run">Run / Parse</button>
+  <button id="play" disabled>▶ Play</button>
+  <button id="pause" disabled>Ⅱ Pause</button>
+  <button id="prev" disabled>← Previous</button>
+  <button id="next" disabled>Next →</button>
+  <button class="warn" id="reset" disabled>↺ Reset</button>
+ </div>
+</section>
+
+<div id="error"></div>
+<section class="info">
+ <div><strong id="stepTitle">Ready</strong></div>
+ <div id="status">Paste code and select Run / Parse.</div>
+ <div class="progress"><div id="bar"></div></div>
+</section>
+
+<section class="grid">
+ <div class="panel stack"><h3>⚡ Call Stack</h3><div class="items" id="stack"><div class="empty">Empty</div></div></div>
+ <div class="panel nt"><h3>🟣 process.nextTick queue</h3><div class="items" id="nextQueue"><div class="empty">Empty</div></div></div>
+ <div class="panel prom"><h3>🔵 Promise microtask queue</h3><div class="items" id="promiseQueue"><div class="empty">Empty</div></div></div>
+ <div class="panel timers"><h3>🟠 Timers / setImmediate</h3><div class="items" id="timerQueue"><div class="empty">Empty</div></div></div>
+</section>
+<section class="console"><h3>Console output</h3><div id="output"></div></section>
+<footer>
+This is a teaching simulator for the supported subset, not a full JavaScript engine. It models CommonJS-style top-level scheduling. Top-level setTimeout(0) vs setImmediate ordering can vary in real Node.js; this simulator displays timers before immediates for a repeatable walkthrough. Real I/O, async/await, variables, loops, imports, and arbitrary JavaScript are not simulated.
+</footer>
+<section class="author-card" aria-label="Creator information">
+ <p class="author-name">Created by Harish</p>
+ <p class="author-role">Software Engineer | Backend Developer</p>
+ <div class="author-links">
+  <a href="tel:+917011206655">☎ +91 7011206655</a>
+  <a href="mailto:harishk2711992@gmail.com">✉ harishk2711992@gmail.com</a>
+  <a href="https://github.com/Harish-kumar99" target="_blank" rel="noopener noreferrer">💻 GitHub: Harish-kumar99</a>
+  <a href="https://medium.com/@harishk271199" target="_blank" rel="noopener noreferrer">✍ Medium: @harishk271199</a>
+ </div>
+ <div class="copyright">© 2026 Harish. All rights reserved.</div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const sample = $('source').value;
+let frames=[], index=0, playTimer=null;
+
+function updateLineNumbers(){
+  const source = $('source');
+  const count = source.value.split('\n').length;
+  $('lineNumbers').textContent = Array.from({length:count}, (_,i)=>i+1).join('\n');
+  $('lineNumbers').scrollTop = source.scrollTop;
+}
+$('source').addEventListener('input', updateLineNumbers);
+$('source').addEventListener('scroll', () => {
+  $('lineNumbers').scrollTop = $('source').scrollTop;
+});
+updateLineNumbers();
+
+function tokenize(src){
+  const tokens=[], lines=[]; let i=0, line=1;
+  const push=(token, tokenLine=line)=>{tokens.push(token);lines.push(tokenLine)};
+  while(i<src.length){
+    if(/\s/.test(src[i])){if(src[i]==='\n')line++;i++;continue}
+    if(src.slice(i,i+2)==='//'){while(i<src.length&&src[i]!=='\n')i++;continue}
+    if(src.slice(i,i+2)==='/*'){const end=src.indexOf('*/',i+2);if(end<0)throw Error('Unclosed comment');line+=(src.slice(i,end+2).match(/\n/g)||[]).length;i=end+2;continue}
+    if(src.slice(i,i+2)==='=>'){push('=>');i+=2;continue}
+    if(src[i]==='"'||src[i]==="'"||src[i]==='`'){
+      const q=src[i++], startLine=line;let s='';
+      while(i<src.length&&src[i]!==q){
+        if(src[i]==='\\'){i++;if(i>=src.length)break;const c=src[i++];s+=c==='n'?'\n':c==='t'?'\t':c}
+        else {if(src[i]==='\n')line++;s+=src[i++]}
+      }
+      if(src[i]!==q)throw Error('Unclosed string');i++;push({type:'string',value:s},startLine);continue;
+    }
+    if(/[0-9]/.test(src[i])){const startLine=line;let n='';while(/[0-9.]/.test(src[i]||''))n+=src[i++];push({type:'number',value:Number(n)},startLine);continue}
+    if(/[A-Za-z_$]/.test(src[i])){const startLine=line;let w='';while(/[A-Za-z0-9_$]/.test(src[i]||''))w+=src[i++];push(w,startLine);continue}
+    if('(){}.,;'.includes(src[i])){push(src[i++]);continue}
+    throw Error('Unsupported character: '+src[i]);
+  }
+  return {tokens,lines};
+}
+function parse(src){
+ const scanned=tokenize(src), t=scanned.tokens, lines=scanned.lines;let p=0;
+ const peek=()=>t[p]; const take=()=>t[p++];
+ const expect=x=>{if(take()!==x)throw Error('Expected "'+x+'" near token '+p)};
+ const maybe=x=>{if(peek()===x){p++;return true}return false};
+ function arrow(){
+   expect('(');expect(')');expect('=>');
+   if(maybe('{')){const body=statements('}');expect('}');return body}
+   return [statement()];
+ }
+ function statement(){
+   const sourceLine=lines[p]||1;
+   if(peek()==='console'){ 
+     take();expect('.');expect('log');expect('(');
+     const v=take();if(!v||!['string','number'].includes(v.type))throw Error('console.log supports string or number literals');
+     expect(')');maybe(';');return {type:'log',value:String(v.value)};
+   }
+   if(peek()==='process'){
+     take();expect('.');expect('nextTick');expect('(');const body=arrow();expect(')');maybe(';');return {type:'schedule',kind:'next',body,line:sourceLine};
+   }
+   if(peek()==='Promise'){
+     take();expect('.');expect('resolve');expect('(');expect(')');expect('.');expect('then');expect('(');
+     const body=arrow();expect(')');maybe(';');return {type:'schedule',kind:'promise',body,line:sourceLine};
+   }
+   if(peek()==='setTimeout'||peek()==='setImmediate'){
+     const kind=take()==='setTimeout'?'timer':'immediate';expect('(');const body=arrow();
+     if(kind==='timer'){expect(',');const delay=take();if(!delay||delay.type!=='number')throw Error('setTimeout delay must be a number');}
+     expect(')');maybe(';');return {type:'schedule',kind,body,line:sourceLine};
+   }
+   throw Error('Unsupported statement near token '+(p+1)+': '+String(peek())+'. Use only the supported calls shown above.');
+ }
+ function statements(end){const a=[];while(p<t.length&&peek()!==end)a.push(statement());return a}
+ const ast=statements();if(p!==t.length)throw Error('Unexpected token: '+String(peek()));return ast;
+}
+function simulate(ast){
+ let nt=[],pr=[],timers=[],imms=[],out=[],snap=[];
+ const clone=a=>a.map(x=>({...x}));
+ function record(title,desc,stack=[]){
+   snap.push({title,desc,stack:[...stack],nt:clone(nt),pr:clone(pr),timers:clone(timers),imms:clone(imms),out:[...out]});
+ }
+ let seq=0, nextCount=0, promiseCount=0;
+ function enqueue(kind,body,label,line){
+   let displayLabel=label;
+   if(kind==='next')displayLabel=`N${++nextCount}(line ${line})`;
+   else if(kind==='promise')displayLabel=`P${++promiseCount}(line ${line})`;
+   const item={id:++seq,label:displayLabel,body};
+   if(kind==='next')nt.push(item);
+   else if(kind==='promise')pr.push(item);
+   else if(kind==='timer')timers.push(item);
+   else imms.push(item);
+ }
+ function executeList(list,context){
+   for(const s of list){
+     if(s.type==='log'){out.push(s.value);record('Executing '+context,'console.log('+JSON.stringify(s.value)+')',[context]);}
+     else enqueue(s.kind,s.body,s.kind==='next'?'nextTick':s.kind==='promise'?'Promise':s.kind==='timer'?'setTimeout':'setImmediate',s.line);
+   }
+ }
+ function checkpoint(){
+   // CommonJS-style checkpoint: drain nextTick queue, then Promise queue.
+   while(nt.length||pr.length){
+     while(nt.length){
+       const item=nt.shift();record('Running '+item.label,'Callback begins. Any nested nextTicks join the end of the nextTick queue.',[item.label+' callback']);
+       executeList(item.body,item.label+' callback');
+       record('Finished '+item.label,'Callback completed; continue draining nextTick queue before Promise microtasks.',[]);
+     }
+     while(pr.length){
+       const item=pr.shift();record('Running '+item.label,'Promise callback begins. Newly scheduled Promises join the Promise queue.',[item.label+' callback']);
+       executeList(item.body,item.label+' callback');
+       record('Finished '+item.label,'Promise callback completed. The current Promise queue is drained before newly queued nextTicks run.',[]);
+     }
+   }
+ }
+ record('Ready','Starting simulation.',[]);
+ record('Main script','Run synchronous statements from top to bottom.', ['Main script']);
+ executeList(ast,'Main script');
+ record('Main script finished','Synchronous code has completed. Now drain nextTick and Promise queues.',[]);
+ checkpoint();
+ while(timers.length||imms.length){
+   // Deterministic teaching convention, not a claim about top-level real Node ordering.
+   const item=timers.length?timers.shift():imms.shift();
+   record('Event loop: '+item.label,'Executing scheduled callback.',[item.label+' callback']);
+   executeList(item.body,item.label+' callback');
+   record(item.label+' callback finished','Run a microtask checkpoint before the next event-loop callback.',[]);
+   checkpoint();
+ }
+ record('Complete','All supported queues are empty.',[]);
+ return snap;
+}
+function render(){
+ const f=frames[index];if(!f)return;
+ $('stepTitle').textContent=`Step ${index+1} / ${frames.length}: ${f.title}`;
+ $('status').textContent=f.desc;
+ function list(id,arr,empty){
+   $(id).innerHTML=arr.length?arr.map(x=>`<div class="item">${escapeHtml(x.label||x)}</div>`).join(''):`<div class="empty">${empty}</div>`;
+ }
+ list('stack',f.stack.map(x=>({label:x})),'Empty');
+ list('nextQueue',f.nt,'Empty');
+ list('promiseQueue',f.pr,'Empty');
+ list('timerQueue',[...f.timers,...f.imms.map(x=>({...x,label:'setImmediate'}))],'Empty');
+ $('output').innerHTML=f.out.map(x=>`<span class="out">${escapeHtml(x)}</span>`).join('');
+ $('bar').style.width=((index+1)/frames.length*100)+'%';
+ $('prev').disabled=index===0;$('next').disabled=index===frames.length-1;
+ $('play').disabled=frames.length===0;$('pause').disabled=!playTimer;
+ $('reset').disabled=frames.length===0;
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function pause(){if(playTimer){clearInterval(playTimer);playTimer=null}if(frames.length)render()}
+function run(){
+ pause();$('error').style.display='none';
+ try{frames=simulate(parse($('source').value));index=0;render()}
+ catch(e){$('error').textContent=e.message;$('error').style.display='block';frames=[];render()}
+}
+$('run').onclick=run;
+$('next').onclick=()=>{pause();if(index<frames.length-1){index++;render()}};
+$('prev').onclick=()=>{pause();if(index>0){index--;render()}};
+$('reset').onclick=()=>{pause();index=0;render()};
+$('play').onclick=()=>{if(!frames.length)return;if(index===frames.length-1)index=0;if(!playTimer){playTimer=setInterval(()=>{if(index<frames.length-1){index++;render()}else pause()},850);render()}};
+$('pause').onclick=pause;
+run();
+</script>
+</body>
+</html>
